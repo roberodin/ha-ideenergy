@@ -58,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api=api,
         barriers={
             DataSetType.MEASURE: TimeDeltaBarrier(
-                delta=timedelta(minutes=10),
+                delta=timedelta(minutes=5),
             ),
             DataSetType.HISTORICAL_CONSUMPTION: TimeDeltaBarrier(
                 delta=timedelta(hours=6)
@@ -70,7 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 delta=timedelta(hours=36)
             ),
         },
-        update_interval=timedelta(minutes=10),
+        update_interval=timedelta(minutes=5),
     )
 
     # Don't refresh coordinator yet since there isn't any sensor registered
