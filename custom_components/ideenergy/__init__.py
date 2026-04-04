@@ -18,7 +18,6 @@
 
 import asyncio
 import logging
-import math
 from datetime import timedelta
 
 import ideenergy
@@ -29,21 +28,16 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .barrier import TimeDeltaBarrier, TimeWindowBarrier  # NoopBarrier,
+from .barrier import TimeDeltaBarrier
 from .const import (
     API_USER_SESSION_TIMEOUT,
     CONF_CONTRACT,
     DOMAIN,
-    MAX_RETRIES,
-    MEASURE_MAX_AGE,
-    MIN_SCAN_INTERVAL,
-    UPDATE_WINDOW_END_MINUTE,
-    UPDATE_WINDOW_START_MINUTE,
 )
 from .datacoordinator import DataSetType, IDeCoordinator
 from .updates import update_integration
 
-PLATFORMS: list[str] = [Platform.SENSOR]
+PLATFORMS: list[str] = [Platform.SENSOR, Platform.BUTTON]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,13 +57,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass=hass,
         api=api,
         barriers={
-            DataSetType.MEASURE: TimeWindowBarrier(
-                allowed_window_minutes=(
-                    UPDATE_WINDOW_START_MINUTE,
-                    UPDATE_WINDOW_END_MINUTE,
-                ),
-                max_retries=MAX_RETRIES,
-                max_age=timedelta(seconds=MEASURE_MAX_AGE),
+            DataSetType.MEASURE: TimeDeltaBarrier(
+                delta=timedelta(minutes=10),
             ),
             DataSetType.HISTORICAL_CONSUMPTION: TimeDeltaBarrier(
                 delta=timedelta(hours=6)
@@ -81,11 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 delta=timedelta(hours=36)
             ),
         },
-        # Use default update_interval and relay on barriers for now
-        # MEASURE barrier should deny if last attempt (success or not) is too recent to
-        # prevent api smashing or subsequent baning
-        update_interval=_calculate_datacoordinator_update_interval(),
-        # update_interval=timedelta(seconds=30),
+        update_interval=timedelta(minutes=10),
     )
 
     # Don't refresh coordinator yet since there isn't any sensor registered
@@ -127,19 +112,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
-
-
-def _calculate_datacoordinator_update_interval() -> timedelta:
-    #
-    # Calculate SCAN_INTERVAL to allow two updates within the update window
-    #
-    update_window_width = (
-        UPDATE_WINDOW_END_MINUTE * 60 - UPDATE_WINDOW_START_MINUTE * 60
-    )
-    update_interval = math.floor(update_window_width / 2)
-    update_interval = max([MIN_SCAN_INTERVAL, update_interval])
-
-    return timedelta(seconds=update_interval)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry):

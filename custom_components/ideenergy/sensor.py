@@ -50,7 +50,7 @@ from homeassistant.core import HomeAssistant, callback, dt_util
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import DiscoveryInfoType
-from homeassistant.util import dt as dtutil
+from homeassistant.util import dt as dtutil, slugify
 from homeassistant_historical_sensor import HistoricalSensor, HistoricalState
 from ideenergy.types import PeriodValue
 
@@ -62,6 +62,7 @@ from .datacoordinator import (
     DATA_ATTR_MEASURE_ACCUMULATED,
     DATA_ATTR_MEASURE_INSTANT,
     DataSetType,
+    IDeCoordinator,
 )
 from .entity import IDeEntity
 from .fixes import async_fix_statistics
@@ -400,6 +401,88 @@ class HistoricalPowerDemand(HistoricalSensorMixin, IDeEntity, SensorEntity):
         return ret
 
 
+class LastMeasureUpdate(SensorEntity):
+    """Sensor showing the timestamp of the last successful MEASURE update."""
+
+    def __init__(
+        self,
+        coordinator: IDeCoordinator,
+        device_info,
+    ) -> None:
+        self._coordinator = coordinator
+        self._attr_has_entity_name = True
+        self._attr_name = "Last Update"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:clock-check-outline"
+        self._attr_entity_registry_enabled_default = True
+        self._last_reported: datetime | None = None
+
+        cups = dict(device_info["identifiers"])["cups"]
+        self._attr_unique_id = slugify(f"{cups}-last-measure-update", separator="-")
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._coordinator.last_measure_update
+
+    @property
+    def should_poll(self) -> bool:
+        return False
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        current = self._coordinator.last_measure_update
+        if current != self._last_reported:
+            self._last_reported = current
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self._handle_coordinator_update)
+        )
+
+
+class NextScheduledUpdate(SensorEntity):
+    """Sensor showing the estimated next scheduled MEASURE update."""
+
+    def __init__(
+        self,
+        coordinator: IDeCoordinator,
+        device_info,
+    ) -> None:
+        self._coordinator = coordinator
+        self._attr_has_entity_name = True
+        self._attr_name = "Next Update"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:clock-outline"
+        self._attr_entity_registry_enabled_default = True
+        self._last_reported: datetime | None = None
+
+        cups = dict(device_info["identifiers"])["cups"]
+        self._attr_unique_id = slugify(f"{cups}-next-scheduled-update", separator="-")
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._coordinator.next_scheduled_update
+
+    @property
+    def should_poll(self) -> bool:
+        return False
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        current = self._coordinator.next_scheduled_update
+        if current != self._last_reported:
+            self._last_reported = current
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self._handle_coordinator_update)
+        )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -423,6 +506,12 @@ async def async_setup_entry(
         ),
         HistoricalPowerDemand(
             config_entry=config_entry, device_info=device_info, coordinator=coordinator
+        ),
+        LastMeasureUpdate(
+            coordinator=coordinator, device_info=device_info
+        ),
+        NextScheduledUpdate(
+            coordinator=coordinator, device_info=device_info
         ),
     ]
     async_add_devices(sensors)

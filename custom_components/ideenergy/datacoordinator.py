@@ -105,6 +105,9 @@ class IDeCoordinator(DataUpdateCoordinator):
 
         self.sensors: list[IDeEntity] = []
 
+        # Track last successful MEASURE update timestamp
+        self._last_measure_update: datetime | None = None
+
     async def _async_update_data(self):
         """Fetch data from API endpoint.
 
@@ -212,6 +215,9 @@ class IDeCoordinator(DataUpdateCoordinator):
 
             self.barriers[dataset].success()
 
+            if dataset is DataSetType.MEASURE:
+                self._last_measure_update = dt_util.now()
+
             _LOGGER.debug(f"update successful for {dataset.name}")
 
         # delay = random.randint(DELAY_MIN_SECONDS * 10, DELAY_MAX_SECONDS * 10) / 10
@@ -219,6 +225,26 @@ class IDeCoordinator(DataUpdateCoordinator):
         # await asyncio.sleep(delay)
 
         return data
+
+    async def async_force_measure_update(self) -> None:
+        """Force an immediate update of MEASURE data, bypassing barriers."""
+        barrier = self.barriers.get(DataSetType.MEASURE)
+        if barrier and hasattr(barrier, "force_next"):
+            barrier.force_next()
+        await self.async_request_refresh()
+
+    @property
+    def last_measure_update(self) -> datetime | None:
+        return self._last_measure_update
+
+    @property
+    def next_scheduled_update(self) -> datetime | None:
+        """Estimate the next scheduled coordinator update."""
+        if self.update_interval is None:
+            return None
+        if self._last_measure_update is not None:
+            return self._last_measure_update + self.update_interval
+        return dt_util.now() + self.update_interval
 
     def register_sensor(self, sensor: IDeEntity) -> None:
         self.sensors.append(sensor)

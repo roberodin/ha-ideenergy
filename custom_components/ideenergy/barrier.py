@@ -121,9 +121,14 @@ class TimeDeltaBarrier(Barrier):
     ):
         self._delta = delta
         self._last_success = last_success or dt_util.utc_from_timestamp(0)
+        self._force_next = False
 
     @check_tzinfo("now", optional=True)
     def check(self, now: datetime | None = None) -> None:
+        if self._force_next:
+            _LOGGER.debug("forced flag is set, bypassing delta check")
+            return
+
         now = now or self.utcnow()
 
         diff = now - self._last_success
@@ -133,14 +138,18 @@ class TimeDeltaBarrier(Barrier):
                 reason=f"no max_age reached ({diff} <= {self._delta})",
             )
 
+    def force_next(self) -> None:
+        self._force_next = True
+
     @check_tzinfo("now", optional=True)
     def success(self, now: datetime | None = None) -> None:
         now = now or self.utcnow()
+        self._force_next = False
         self._last_success = now
 
     @check_tzinfo("now", optional=True)
     def fail(self, now: datetime | None = None) -> None:
-        pass
+        self._force_next = False
 
     def utcnow(self) -> datetime:
         return dt_util.utcnow()

@@ -84,8 +84,6 @@ class IDeEntity(CoordinatorEntity):
 
         self.coordinator.register_sensor(self)
 
-        await self.coordinator.async_request_refresh()
-
     async def async_will_remove_from_hass(self) -> None:
         self.coordinator.unregister_sensor(self)
         await super().async_will_remove_from_hass()
