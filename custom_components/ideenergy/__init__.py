@@ -32,12 +32,16 @@ from .barrier import TimeDeltaBarrier
 from .const import (
     API_USER_SESSION_TIMEOUT,
     CONF_CONTRACT,
+    CONF_HIGH_POWER_THRESHOLD,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_HIGH_POWER_THRESHOLD,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
 from .datacoordinator import DataSetType, IDeCoordinator
 from .updates import update_integration
 
-PLATFORMS: list[str] = [Platform.SENSOR, Platform.BUTTON]
+PLATFORMS: list[str] = [Platform.SENSOR, Platform.BUTTON, Platform.BINARY_SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,12 +57,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     device_info = IDeEnergyDeviceInfo(contract_details)
 
+    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+
     coordinator = IDeCoordinator(
         hass=hass,
         api=api,
         barriers={
             DataSetType.MEASURE: TimeDeltaBarrier(
-                delta=timedelta(minutes=5),
+                delta=timedelta(minutes=scan_interval),
             ),
             DataSetType.HISTORICAL_CONSUMPTION: TimeDeltaBarrier(
                 delta=timedelta(hours=6)
@@ -70,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 delta=timedelta(hours=36)
             ),
         },
-        update_interval=timedelta(minutes=5),
+        update_interval=timedelta(minutes=scan_interval),
     )
 
     # Don't refresh coordinator yet since there isn't any sensor registered

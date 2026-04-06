@@ -18,7 +18,7 @@
 
 import enum
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, TypedDict
 
 import ideenergy
@@ -108,6 +108,11 @@ class IDeCoordinator(DataUpdateCoordinator):
         # Track last successful MEASURE update timestamp
         self._last_measure_update: datetime | None = None
 
+        # Diagnostics
+        self._session_status: str = "unknown"
+        self._login_count_today: int = 0
+        self._login_count_date: date = date.today()
+
     async def _async_update_data(self):
         """Fetch data from API endpoint.
 
@@ -138,6 +143,13 @@ class IDeCoordinator(DataUpdateCoordinator):
         data = self.data | updated_data
         return data
 
+    def _increment_login_count(self) -> None:
+        today = date.today()
+        if self._login_count_date != today:
+            self._login_count_today = 0
+            self._login_count_date = today
+        self._login_count_today += 1
+
     async def _ensure_session(self) -> None:
         """Ensure we have a valid session, preferring renewal over fresh login.
 
@@ -149,14 +161,21 @@ class IDeCoordinator(DataUpdateCoordinator):
                 session_info = await self.api.renew_session()
                 if session_info.get("usSes"):
                     self.api._login_ts = datetime.now()
+                    self._session_status = "renewed"
                     _LOGGER.debug("session renewed successfully")
                     return
             except Exception:
                 _LOGGER.debug("session renewal failed, will try fresh login")
 
-        self.api._login_ts = None
-        await self.api.login()
-        _LOGGER.debug("fresh login completed")
+        try:
+            self.api._login_ts = None
+            await self.api.login()
+            self._increment_login_count()
+            self._session_status = "connected"
+            _LOGGER.debug("fresh login completed")
+        except Exception:
+            self._session_status = "error"
+            raise
 
     async def _fetch_dataset(self, dataset: DataSetType) -> dict[str, Any]:
         if dataset is DataSetType.MEASURE:
@@ -224,6 +243,8 @@ class IDeCoordinator(DataUpdateCoordinator):
                     try:
                         self.api._login_ts = None
                         await self.api.login()
+                        self._increment_login_count()
+                        self._session_status = "connected"
                         data.update(await self._fetch_dataset(dataset))
                     except Exception as retry_err:
                         _LOGGER.warning(
@@ -273,6 +294,17 @@ class IDeCoordinator(DataUpdateCoordinator):
     @property
     def last_measure_update(self) -> datetime | None:
         return self._last_measure_update
+
+    @property
+    def session_status(self) -> str:
+        return self._session_status
+
+    @property
+    def daily_login_count(self) -> int:
+        today = date.today()
+        if self._login_count_date != today:
+            return 0
+        return self._login_count_today
 
     @property
     def next_scheduled_update(self) -> datetime | None:
