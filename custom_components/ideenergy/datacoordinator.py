@@ -138,6 +138,38 @@ class IDeCoordinator(DataUpdateCoordinator):
         data = self.data | updated_data
         return data
 
+    async def _ensure_session(self) -> None:
+        """Ensure we have a valid session, preferring renewal over fresh login.
+
+        This reduces the number of full logins, avoiding i-DE's 2FA trigger
+        (enforced after ~6 logins per week).
+        """
+        if self.api.is_logged:
+            try:
+                session_info = await self.api.renew_session()
+                if session_info.get("usSes"):
+                    self.api._login_ts = datetime.now()
+                    _LOGGER.debug("session renewed successfully")
+                    return
+            except Exception:
+                _LOGGER.debug("session renewal failed, will try fresh login")
+
+        self.api._login_ts = None
+        await self.api.login()
+        _LOGGER.debug("fresh login completed")
+
+    async def _fetch_dataset(self, dataset: DataSetType) -> dict[str, Any]:
+        if dataset is DataSetType.MEASURE:
+            return await self.get_direct_reading_data()
+        elif dataset is DataSetType.HISTORICAL_CONSUMPTION:
+            return await self.get_historical_consumption_data()
+        elif dataset is DataSetType.HISTORICAL_GENERATION:
+            return await self.get_historical_generation_data()
+        elif dataset is DataSetType.HISTORICAL_POWER_DEMAND:
+            return await self.get_historical_power_demand_data()
+        else:
+            raise ValueError(f"Unknown dataset: {dataset.name}")
+
     async def _async_update_data_raw(
         self, datasets: DataSetType = DataSetType.ALL, now: datetime | None = None
     ) -> dict[str, Any]:
@@ -149,6 +181,12 @@ class IDeCoordinator(DataUpdateCoordinator):
         requested = (x for x in requested if x is not DataSetType.ALL)
         requested = (x for x in requested if x & datasets)
         requested = list(requested)  # type: ignore[assignment]
+
+        # Ensure session is alive before fetching data
+        try:
+            await self._ensure_session()
+        except Exception as e:
+            _LOGGER.debug(f"session setup failed: {e!r}, will try fetching anyway")
 
         data = {}
 
@@ -169,47 +207,46 @@ class IDeCoordinator(DataUpdateCoordinator):
 
             # API calls and handle exceptions
             try:
-                if dataset is DataSetType.MEASURE:
-                    data.update(await self.get_direct_reading_data())
-
-                elif dataset is DataSetType.HISTORICAL_CONSUMPTION:
-                    data.update(await self.get_historical_consumption_data())
-
-                elif dataset is DataSetType.HISTORICAL_GENERATION:
-                    data.update(await self.get_historical_generation_data())
-
-                elif dataset is DataSetType.HISTORICAL_POWER_DEMAND:
-                    data.update(await self.get_historical_power_demand_data())
-
-                else:
-                    _LOGGER.debug(
-                        f"update ignored for {dataset.name}: not implemented yet"
-                    )
-                    continue
+                data.update(await self._fetch_dataset(dataset))
 
             except UnicodeDecodeError:
-                _LOGGER.debug(
-                    f"update error for {dataset.name}: invalid encoding. File a bug"
+                _LOGGER.warning(
+                    f"update error for {dataset.name}: invalid encoding"
                 )
                 continue
 
             except ideenergy.RequestFailedError as e:
-                _LOGGER.debug(
-                    f"update error for {dataset.name}: "
-                    + f"{e.response.reason} ({e.response.status})"
-                )
-                continue
+                if e.response.status in (403, 500):
+                    _LOGGER.debug(
+                        f"update error for {dataset.name}: "
+                        f"HTTP {e.response.status}, forcing re-login and retrying"
+                    )
+                    try:
+                        self.api._login_ts = None
+                        await self.api.login()
+                        data.update(await self._fetch_dataset(dataset))
+                    except Exception as retry_err:
+                        _LOGGER.warning(
+                            f"update error for {dataset.name}: "
+                            f"retry after re-login also failed: {retry_err!r}"
+                        )
+                        continue
+                else:
+                    _LOGGER.warning(
+                        f"update error for {dataset.name}: "
+                        f"HTTP {e.response.status}"
+                    )
+                    continue
 
             except ideenergy.CommandError as e:
-                _LOGGER.debug(
+                _LOGGER.warning(
                     f"update error for {dataset.name}: command error from API ({e!r})"
                 )
                 continue
 
             except Exception as e:
-                _LOGGER.debug(
-                    f"update error for {dataset.name}: "
-                    + f"**FIXME** handle {dataset.name} raised exception: {e!r}"
+                _LOGGER.warning(
+                    f"update error for {dataset.name}: {e!r}"
                 )
                 continue
 
@@ -218,7 +255,7 @@ class IDeCoordinator(DataUpdateCoordinator):
             if dataset is DataSetType.MEASURE:
                 self._last_measure_update = dt_util.now()
 
-            _LOGGER.debug(f"update successful for {dataset.name}")
+            _LOGGER.debug(f"update OK for {dataset.name}")
 
         # delay = random.randint(DELAY_MIN_SECONDS * 10, DELAY_MAX_SECONDS * 10) / 10
         # _LOGGER.debug(f"  → Random delay: {delay} seconds")
