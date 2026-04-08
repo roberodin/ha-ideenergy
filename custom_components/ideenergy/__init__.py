@@ -58,6 +58,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_info = IDeEnergyDeviceInfo(contract_details)
 
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    _LOGGER.warning(
+        f"Setting up i-DE with scan_interval={scan_interval} min "
+        f"(options={dict(entry.options)})"
+    )
 
     coordinator = IDeCoordinator(
         hass=hass,
