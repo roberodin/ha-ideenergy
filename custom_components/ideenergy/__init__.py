@@ -149,5 +149,5 @@ def IDeEnergyAPI(hass: HomeAssistant, entry: ConfigEntry):
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
         contract=entry.data[CONF_CONTRACT],
-        user_session_timeout=API_USER_SESSION_TIMEOUT,
+        session_timeout=API_USER_SESSION_TIMEOUT,
     )
